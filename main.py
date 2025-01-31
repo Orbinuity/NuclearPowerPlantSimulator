@@ -530,9 +530,9 @@ def main():
     circle_grid = CircleGrid(
         root,
         bg="white",
-        output_balls=3,      # This controls how many balls spawn from uranium
-        uranium_percent=50,  # 50% uranium
-        boron_percent=10,    # 25% will be empty/black
+        output_balls=3,
+        uranium_percent=50,
+        boron_percent=10,
         reset_from=2,
         reset_to=30,
         uranium_color="yellow",
