@@ -68,8 +68,10 @@ class BouncingBall:
         self.canvas.delete(self.ball)
 
 class CircleGrid(tk.Canvas):
-    def __init__(self, master, grid_type, rows=20, cols=20, circle_radius=15, spacing=30, max_clicks=5,
-                 uranium_percent=70, boron_percent=20, reset_from=2, reset_to=30, **kwargs):
+    def __init__(self, master, rows=20, cols=20, circle_radius=15, spacing=30, max_clicks=5,
+                 uranium_percent=70, boron_percent=20, reset_from=2, reset_to=30, output_balls=3,
+                 uranium_color = "yellow", boron_color = "#C0C0C0", empty_color = "black", empty_uranium_color = "#A9A9A9",
+                 do_auto_reset=True, do_manual_reset=True, **kwargs):
         kwargs['width'] = 1900
         kwargs['height'] = 1300
         kwargs['highlightthickness'] = 0
@@ -77,10 +79,10 @@ class CircleGrid(tk.Canvas):
         super().__init__(master, **kwargs)
         
         # Colors
-        self.uranium_color = "yellow"
-        self.boron_color = "#C0C0C0"  # Changed to light gray
-        self.empty_color = "black"
-        self.clicked_color = "black"
+        self.uranium_color = uranium_color
+        self.boron_color = boron_color # Changed to light gray
+        self.empty_color = empty_color
+        self.empty_uranium_color = empty_uranium_color
         
         # Configuration
         self.reset_from = reset_from
@@ -92,44 +94,32 @@ class CircleGrid(tk.Canvas):
         self.circle_radius = circle_radius
         self.spacing = spacing
         self.max_clicks = max_clicks
+        self.output_balls = output_balls  # New variable for number of output balls
         self.circles = {}
         self.circle_clicks = {}
         self.balls = []
         self.hits_to_white = 5
         self.regeneration_timers = {}  # Add dictionary to track regeneration timers
-        self.grid_type = grid_type  # Add grid_type to differentiate between grids
+        self.do_auto_reset = do_auto_reset
+        self.do_manual_reset = do_manual_reset
         
         # Add ball counter label
         self.ball_counter = tk.Label(master, text="Balls: 0", font=("Arial", 16), bg="white")
         self.ball_counter.place(x=10, y=10)
         
-        # Add boron or uranium control slider based on grid_type
-        if grid_type == 'boron':
-            self.slider = tk.Scale(
-                master,
-                from_=100,
-                to=0,
-                orient=tk.VERTICAL,
-                length=300,
-                label="Boron %",
-                command=self.update_boron_percentage,
-                background='white'
-            )
-            self.slider.set(boron_percent)
-            self.slider.place(x=10, y=50)
-        elif grid_type == 'uranium':
-            self.slider = tk.Scale(
-                master,
-                from_=100,
-                to=0,
-                orient=tk.VERTICAL,
-                length=300,
-                label="Uranium %",
-                command=self.update_uranium_percentage,
-                background='white'
-            )
-            self.slider.set(uranium_percent)
-            self.slider.place(x=10, y=400)  # Position below the boron slider
+        # Only keep boron control slider
+        self.boron_slider = tk.Scale(
+            master,
+            from_=100,
+            to=0,
+            orient=tk.VERTICAL,
+            length=300,
+            label="Boron %",
+            command=self.update_boron_percentage,
+            background='white'
+        )
+        self.boron_slider.set(boron_percent)
+        self.boron_slider.place(x=10, y=50)
         
         # Add reset button
         self.reset_button = tk.Button(
@@ -139,12 +129,22 @@ class CircleGrid(tk.Canvas):
             bg="white",
             font=("Arial", 12)
         )
-        self.reset_button.place(x=10, y=360)  # Position below the boron slider
+        self.reset_button.place(x=10, y=360)
         
         self.after(100, self.create_circles)
         self.after(200, self.create_ball)
         self.after(200, self.update)
         self.bind('<Button-1>', self.on_click)
+
+        self.cube_color = "#0000FF"  # Bright blue for cubes
+        self.cube_heat_color = "#FF0000"  # Bright red for heated cubes
+        self.heat_steps = 5  # Number of hits needed for full red
+        self.cubes = {}  # Store cube IDs
+        self.cube_temps = {}  # Store cube temperatures (0.0 to 1.0)
+        self.heat_spread_radius = 3  # Reduced from 5 to 3
+        self.heat_falloff = 0.7  # Increased from 0.5 to 0.7 for faster falloff
+        self.cooling_base_rate = 0.001  # Much slower cooling (was 0.01)
+        self.cooling_interval = 100  # Longer interval between cooling steps (was 50)
 
     def get_color_for_clicks(self, clicks):
         # If not yet at max hits for black, interpolate between yellow and black
@@ -158,7 +158,7 @@ class CircleGrid(tk.Canvas):
                 return tuple(int(hex_color[i:i+2], 16) for i in (1, 3, 5))
 
             start_rgb = hex_to_rgb(self.uranium_color)  # Changed from self.main_color
-            end_rgb = hex_to_rgb(self.empty_color)     # Already correct
+            end_rgb = hex_to_rgb(self.empty_uranium_color)     # Already correct
             ratio = clicks / self.hits_to_white
             
             # Calculate intermediate color
@@ -169,7 +169,7 @@ class CircleGrid(tk.Canvas):
             
             return f'#{current_rgb[0]:02x}{current_rgb[1]:02x}{current_rgb[2]:02x}'
         else:
-            return self.empty_color
+            return self.empty_uranium_color
 
     def create_circles(self):
         # Calculate grid size for centering
@@ -180,26 +180,43 @@ class CircleGrid(tk.Canvas):
         x_start = (self.winfo_width() - grid_width) // 2
         y_start = (self.winfo_height() - grid_height) // 2
         
-        # Create grid of circles with alternating uranium and boron lines
+        # Create checkerboard pattern with random empty spaces based on percentages
         for row in range(self.rows):
             for col in range(self.cols):
                 x = x_start + col * (2 * self.circle_radius + self.spacing) + self.circle_radius
                 y = y_start + row * (2 * self.circle_radius + self.spacing) + self.circle_radius
                 
                 tag = f"circle_{row}_{col}"
-                if row % 3 == 0:
-                    fill_color = self.uranium_color
-                elif row % 3 == 1:
-                    fill_color = self.boron_color
+                cube_tag = f"cube_{row}_{col}"
+                
+                # Create larger background cube
+                cube_size = self.circle_radius * 3.0  # Make cubes bigger
+                cube = self.create_rectangle(
+                    x - cube_size/2, y - cube_size/2,
+                    x + cube_size/2, y + cube_size/2,
+                    fill=self.cube_color,
+                    tags=(cube_tag,)
+                )
+                self.cubes[cube_tag] = cube
+                self.cube_temps[cube_tag] = 0.0
+                
+                # Determine pattern position (1 or 2)
+                is_position_1 = (row % 2 == 0 and col % 2 == 0) or (row % 2 == 1 and col % 2 == 1)
+                
+                # Apply percentages to determine if circle should be empty
+                random_value = random.random() * 100
+                if is_position_1:
+                    fill_color = (self.uranium_color if random_value < self.uranium_percent 
+                                else self.empty_color)
                 else:
-                    fill_color = self.empty_color
+                    fill_color = (self.boron_color if random_value < self.boron_percent 
+                                else self.empty_color)
                 
                 circle = self.create_oval(
                     x - self.circle_radius,
                     y - self.circle_radius,
                     x + self.circle_radius,
                     y + self.circle_radius,
-
                     fill=fill_color,
                     tags=(tag,)
                 )
@@ -210,29 +227,24 @@ class CircleGrid(tk.Canvas):
         try:
             new_boron_percent = float(value)
             self.boron_percent = new_boron_percent
-            # Clear existing circles and regenerate with new percentage
-            for circle_id in self.circles.values():
-                self.delete(circle_id)
-            self.circles.clear()
-            self.circle_clicks.clear()
-            self.regeneration_timers.clear()
-            self.create_circles()
+            self.regenerate_grid()
         except ValueError:
             pass
 
-    def update_uranium_percentage(self, value):
-        try:
-            new_uranium_percent = float(value)
-            self.uranium_percent = new_uranium_percent
-            # Clear existing circles and regenerate with new percentage
-            for circle_id in self.circles.values():
-                self.delete(circle_id)
-            self.circles.clear()
-            self.circle_clicks.clear()
-            self.regeneration_timers.clear()
-            self.create_circles()
-        except ValueError:
-            pass
+    def regenerate_grid(self):
+        # Clear existing circles
+        for circle_id in self.circles.values():
+            self.delete(circle_id)
+        self.circles.clear()
+        self.circle_clicks.clear()
+        self.regeneration_timers.clear()
+        # Clear existing cubes as well
+        for cube_id in self.cubes.values():
+            self.delete(cube_id)
+        self.cubes.clear()
+        self.cube_temps.clear()
+        # Create new grid
+        self.create_circles()
 
     def update_ball_counter(self):
         self.ball_counter.config(text=f"Balls: {len(self.balls)}")
@@ -298,15 +310,21 @@ class CircleGrid(tk.Canvas):
         self.update_ball_counter()
 
     def create_split_balls_from_circle(self, x, y):
-        # Create exactly 3 balls shooting out from the grid circle with evenly spaced angles
-        angles = [
-            random.uniform(0, 2*math.pi/3),           # First third
-            random.uniform(2*math.pi/3, 4*math.pi/3), # Second third
-            random.uniform(4*math.pi/3, 2*math.pi)    # Last third
-        ]
-        for angle in angles:
-            new_ball = BouncingBall(self, radius=8, speed=3, x=x, y=y, angle=angle)  # Reduced speed from 7 to 3
-            self.balls.append(new_ball)
+        # Create exactly 2 balls in opposite directions, no more
+        # Clear all existing balls at this location first
+        for ball in self.balls[:]:
+            if abs(ball.x - x) < 1 and abs(ball.y - y) < 1:
+                ball.remove()
+                self.balls.remove(ball)
+        
+        # Fixed angles for consistent behavior: right and left
+        # Create exactly 2 balls
+        new_balls = []
+
+        for i in range(self.output_balls):
+            new_balls.append(BouncingBall(self, radius=8, speed=3, x=x, y=y, angle=random.randint(0,360)))
+        
+        self.balls.extend(new_balls)
         self.update_ball_counter()
 
     def update(self):
@@ -331,7 +349,7 @@ class CircleGrid(tk.Canvas):
                 current_color = self.itemcget(circle_id, 'fill')
                 
                 # Skip if circle is empty/black
-                if current_color == self.empty_color:
+                if current_color == self.empty_color or current_color == self.empty_uranium_color:
                     continue
                     
                 circle_x = (bbox[0] + bbox[2]) / 2
@@ -344,21 +362,27 @@ class CircleGrid(tk.Canvas):
                     if current_color == self.boron_color:
                         return True
                     
-                    if current_color != self.empty_color:  # Changed condition
+                    if current_color != self.empty_color and current_color != self.empty_uranium_color:
                         self.circle_clicks[tag] += 1
                         new_color = self.get_color_for_clicks(self.circle_clicks[tag])
                         self.itemconfig(circle_id, fill=new_color)
                         
-                        # Start regeneration timer if hits reach max
-                        if self.circle_clicks[tag] >= self.hits_to_white:  # Changed from max_clicks
+                        if self.circle_clicks[tag] >= self.max_clicks:
                             self.start_regeneration_timer(tag, circle_id)
                         
-                        # Create 3 new red balls when uranium is hit
+                        # Heat up the cube when uranium is hit
+                        cube_tag = f"cube_{tag.split('_')[1]}_{tag.split('_')[2]}"
+                        self.heat_cube(cube_tag)
+                        
+                        # Create exactly two balls
                         self.create_split_balls_from_circle(circle_x, circle_y)
                         return True
         return False
 
     def start_regeneration_timer(self, tag, circle_id):
+        if not self.do_auto_reset:
+            return  # Don't start timer if auto-reset is disabled
+            
         if tag in self.regeneration_timers:
             self.after_cancel(self.regeneration_timers[tag])
         
@@ -373,6 +397,87 @@ class CircleGrid(tk.Canvas):
             
             if tag in self.regeneration_timers:
                 del self.regeneration_timers[tag]
+
+    def heat_cube(self, cube_tag):
+        # Parse row and col from cube tag
+        _, row, col = cube_tag.split('_')
+        row, col = int(row), int(col)
+        
+        # Heat center cube fully
+        self.cube_temps[cube_tag] = 1.0
+        self.update_cube_color(cube_tag)
+        
+        # Heat surrounding cubes with diminishing effect in a larger radius
+        for r in range(-self.heat_spread_radius, self.heat_spread_radius + 1):
+            for c in range(-self.heat_spread_radius, self.heat_spread_radius + 1):
+                if r == 0 and c == 0:
+                    continue  # Skip center cube (already handled)
+                
+                neighbor_row = row + r
+                neighbor_col = col + c
+                
+                if 0 <= neighbor_row < self.rows and 0 <= neighbor_col < self.cols:
+                    neighbor_tag = f"cube_{neighbor_row}_{neighbor_col}"
+                    if neighbor_tag in self.cube_temps:
+                        # Calculate distance-based heat with gentler falloff
+                        distance = math.sqrt(r*r + c*c)
+                        heat = max(0, 1 - (distance / self.heat_spread_radius) * self.heat_falloff)
+                        # Add heat to neighbor
+                        current_temp = self.cube_temps[neighbor_tag]
+                        self.cube_temps[neighbor_tag] = max(current_temp, heat)
+                        self.update_cube_color(neighbor_tag)
+                        # Start cooling for neighbor
+                        self.after(50, lambda t=neighbor_tag: self.cool_cube(t))
+        
+        # Start cooling for center cube
+        self.after(50, lambda: self.cool_cube(cube_tag))
+
+    def cool_cube(self, cube_tag):
+        if self.cube_temps[cube_tag] > 0:
+            _, row, col = cube_tag.split('_')
+            row, col = int(row), int(col)
+            
+            # Calculate cooling rate based on neighbors
+            total_temp = 0
+            neighbor_count = 0
+            
+            for r in range(-1, 2):
+                for c in range(-1, 2):
+                    if r == 0 and c == 0:
+                        continue
+                    
+                    neighbor_row = row + r
+                    neighbor_col = col + c
+                    
+                    if 0 <= neighbor_row < self.rows and 0 <= neighbor_col < self.cols:
+                        neighbor_tag = f"cube_{neighbor_row}_{neighbor_col}"
+                        if neighbor_tag in self.cube_temps:
+                            total_temp += self.cube_temps[neighbor_tag]
+                            neighbor_count += 1
+            
+            # Cool much slower than before
+            if neighbor_count > 0:
+                avg_temp = total_temp / neighbor_count
+                cooling_rate = self.cooling_base_rate * (1 + (self.cube_temps[cube_tag] - avg_temp))
+            else:
+                cooling_rate = self.cooling_base_rate
+            
+            self.cube_temps[cube_tag] = max(0.0, self.cube_temps[cube_tag] - cooling_rate)
+            self.update_cube_color(cube_tag)
+            
+            if self.cube_temps[cube_tag] > 0:
+                self.after(self.cooling_interval, lambda: self.cool_cube(cube_tag))
+
+    def update_cube_color(self, cube_tag):
+        # Smoother color interpolation between blue and red
+        temp = self.cube_temps[cube_tag]
+        
+        # Start from blue (0,0,255) to red (255,0,0)
+        r = int(255 * temp)
+        b = int(255 * (1-temp))
+        color = f"#{r:02x}00{b:02x}"
+        
+        self.itemconfig(self.cubes[cube_tag], fill=color)
 
     def on_click(self, event):
         closest = self.find_closest(event.x, event.y)
@@ -389,10 +494,15 @@ class CircleGrid(tk.Canvas):
                     dy = y - circle_y
                     if math.sqrt(dx*dx + dy*dy) <= self.circle_radius:
                         current_color = self.itemcget(closest[0], 'fill')
-                        # Convert color names to RGB values for comparison
+                        
+                        # Handle manual reset of depleted uranium
+                        if self.do_manual_reset and current_color == self.empty_uranium_color:
+                            self.regenerate_uranium(tags[0], closest[0])
+                            return
+                        
+                        # Original click handling
                         if self.winfo_rgb(current_color) == self.winfo_rgb(self.empty_color):
                             self.itemconfig(closest[0], fill=self.final_color)
-                            # Also update the click count to max to prevent ball interactions
                             tag = tags[0]
                             self.circle_clicks[tag] = self.max_clicks
 
@@ -415,31 +525,25 @@ def main():
     root.geometry(f'{window_width}x{window_height}+{center_x}+{center_y}')
     root.resizable(False, False)
     
-    # Create and place the boron grid
-    boron_grid = CircleGrid(
+    # Create and place the circle grid with no padding
+    circle_grid = CircleGrid(
         root,
-        grid_type='boron',
         bg="white",
-        max_clicks=5,
+        output_balls=3,      # This controls how many balls spawn from uranium
         uranium_percent=50,  # 50% uranium
-        boron_percent=25,    # 25% boron (25% will be empty/black)
+        boron_percent=10,    # 25% will be empty/black
         reset_from=2,
-        reset_to=30
+        reset_to=30,
+        uranium_color="yellow",
+        boron_color="#C0C0C0",
+        empty_color="black",
+        empty_uranium_color="white",
+        do_auto_reset=False,
+        do_manual_reset=True
     )
-    boron_grid.place(x=0, y=0, width=950, height=1300)  # Left half of the window
     
-    # Create and place the uranium grid
-    uranium_grid = CircleGrid(
-        root,
-        grid_type='uranium',
-        bg="white",
-        max_clicks=5,
-        uranium_percent=50,  # 50% uranium
-        boron_percent=25,    # 25% boron (25% will be empty/black)
-        reset_from=2,
-        reset_to=30
-    )
-    uranium_grid.place(x=950, y=0, width=950, height=1300)  # Right half of the window
+    # Fill the entire window with the canvas
+    circle_grid.pack(fill="both", expand=True, padx=0, pady=0)
     
     root.mainloop()
 
