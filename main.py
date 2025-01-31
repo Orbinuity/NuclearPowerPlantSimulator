@@ -1,3 +1,4 @@
+# Made by Orbinuity company PLEASE read the license
 import tkinter as tk
 import random
 import math
