@@ -1,6 +1,6 @@
 # Nuclear Power Plant Simulator
 
-A simulation project for nuclear power plant operations and management.
+An nuclear power plant simulator
 
 ## License
 
