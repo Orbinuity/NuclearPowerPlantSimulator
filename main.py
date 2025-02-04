@@ -445,7 +445,6 @@ class Controlls(tk.Canvas):
         )
 
         self.reset_button.place(x=10, y=290)
-        self.scram_button.place(x=kwargs['width']-150, y=290)
         
         self.after(100, self.create_circles)
         self.after(110, self.update)
