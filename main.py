@@ -436,8 +436,6 @@ class Controlls(tk.Canvas):
         self.boron_slider.set(circle_grid.live_boron_percent)
         self.boron_slider.place(x=10, y=200)
         
-        self.blank_image = tk.PhotoImage(width=1, height=1)
-        
         self.reset_button = tk.Button(
             master,
             text="Fire neuron",
@@ -445,26 +443,13 @@ class Controlls(tk.Canvas):
             bg="gray",
             font=("Arial", 12)
         )
-        self.scram_button = tk.Button(
-            master,
-            text="SCRAM",
-            image=self.blank_image,
-            command=self.scram,
-            compound='center',
-            width=5,
-            height=5,
-            font=("Arial", 12)
-        )
-        
+
         self.reset_button.place(x=10, y=290)
         self.scram_button.place(x=kwargs['width']-150, y=290)
         
         self.after(100, self.create_circles)
         self.after(110, self.update)
         self.bind('<Button-1>', circle_grid.on_click)
-    
-    def scram(self):
-        print("SCRAM")
         
     def update(self):
         global uranium_heat, power_temp_val, power_procent_val, is_burned
