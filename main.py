@@ -286,7 +286,7 @@ class CircleGrid(tk.Canvas):
         
         uranium_heat = self.uranium_heat
         power_temp_val = round(all_temp/all_temp_dev, 2)
-        power_procent_val = len(self.balls)/11.3
+        power_procent_val = len(self.balls)/11
     
         start_time = time.perf_counter()
         self.frame_count += 1
